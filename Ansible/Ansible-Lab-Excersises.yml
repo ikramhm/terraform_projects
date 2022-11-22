@@ -1,0 +1,312 @@
+
+#DOWNLOADING PACKAGES
+---
+- hosts: web1
+  tasks:
+  - name: Install httpd package
+    yum: 
+      name: httpd
+      state: installed
+##normal usage of package manager
+
+---
+- hosts: web1
+  tasks:
+  - yum:
+      name: http://mirror.centos.org/centos/7/os/x86_64/Packages/wget-1.14-18.el7_6.1.x86_64.rpm
+      state: present
+## This play downloads something from a URL.
+
+---
+- hosts: all
+  tasks:
+    - name: Install unzip package
+      yum:
+        name: unzip-5.52
+        state: present
+## this play downloads a specific version of the package.
+
+---
+- hosts: all
+  tasks:
+    - name: Install iotop package
+      yum:
+        name: iotop
+        state: latest
+# this play downloads the latest version, by the state: latest.
+
+---
+- hosts: web1
+  tasks:
+  - yum: name=sudo state=latest
+  - yum: name=vsftpd-2.2.2 state=present allow_downgrade=yes
+# this play does something important. It downgrades to another version of the package
+# and as such has a unique flag
+
+#STARTING SERVICES
+---
+- name: Start httpd
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: Start httpd service
+      service:
+        name: httpd
+        state: started
+#notice the syntax of name:service, then name,state indented
+
+---
+- hosts: all
+  gather_facts: no
+  tasks:
+    - name: Copy Apache welcome file
+      copy:
+        src: index.html
+        dest: /var/www/html/index.html
+    - service:
+        name: httpd
+        state: reloaded
+# state reloaded is used to make sure service is reloaded and not restarted.
+
+---
+- hosts: all
+  gather_facts: no
+  tasks:
+    - name: Make changes in Apache config
+      replace:
+        path: /etc/httpd/conf/httpd.conf
+        regexp: "^Listen 80"
+        replace: "Listen 443"
+
+    - name: Restart Apache
+      service:
+        name: httpd
+        state: restarted
+# this play introduces the replace module, and state: restarted, to restart a service.
+
+---
+- hosts: all
+  gather_facts: no
+  tasks:
+    - name: Install nginx
+      yum:
+        name: nginx
+        state: present
+
+    - name: Start and enable Nginx
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+#through enabled:yes, the nginx service starts and will automatically start whenever system is rebooted.
+
+---
+- hosts: web1
+  tasks:
+   - yum: name=firewalld state=installed
+   - service: name=firewalld state=started
+#using install and start straight away - no need for different lines, though you could. MAIN TAKEAWAY is that if its on same line its variable=; different lines is variable:
+
+---
+- hosts: web1
+  tasks:
+   - firewalld:
+      source: 172.20.1.101
+      state: enabled
+      zone: internal
+      permanent: yes
+      immediate: yes
+# this play uses the firewalld module to whitelist (enabled as opposed to disabled) the source. The source is the ID of web2 taken from inventory
+
+--- 
+- hosts: web1
+  tasks:
+    - firewalld:        
+        port: 161/udp
+        zone: block
+        permanent: yes
+        immediate: yes
+        state: enabled
+#this is used to block a port permanently. If you dont do permanent, then the firewall change doesnt persist. With immediate alongside it,
+# it runs straight away, otherwise, by default, permanent: yes ensures that the play is enacted upon next reboot!
+# To see if works, SSH into web1 and run "firewall-cmd --list-all --zone=block"
+
+- hosts: web1
+  tasks:
+    - name: Enable HTTPS for ansible controller
+      firewalld:
+        source: 172.20.1.2
+        service: https
+        zone: internal
+        state: enabled
+        permanent: yes
+
+    - service:
+        name: firewalld
+        state: reloaded
+# allows the source https access in an internal zone. To see if works, SSH into web1 and run "firewall-cmd --list-all --zone=internal"
+
+---
+- hosts: web2
+  tasks:
+    - name: Install pkgs
+      yum:
+        name: httpd, firewalld
+        state: present
+
+    - name: Start/Enable services
+      service:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      with_items:
+        - httpd
+        - firewalld
+
+    - name: Change Apache port
+      replace:
+        path: /etc/httpd/conf/httpd.conf
+        regexp: "Listen 80"
+        replace: "Listen 8082"
+
+    - name: restart Apache
+      service:
+        name: httpd
+        state: restarted
+
+    - name: Add firewall rule for Apache
+      firewalld:
+        port: 8082/tcp
+        zone: public
+        permanent: yes
+        state: enabled
+        immediate: true
+  # complicated playtha installs packages, enables it, and the assigns the firewalls for the apache server! very good!
+
+  ---
+- name: Zip archive opt.zip
+  hosts: web1
+  tasks:
+   - archive:
+       path: /opt
+       dest: /root/opt.zip
+       format: zip
+#simple syntax for zipping a file, using the archive module
+---
+- name: extract local.zip to web1
+  hosts: web1
+  tasks:
+  - unarchive:
+      src: local.zip
+      dest: /tmp
+#unzip a file using unarchive
+---
+- name: Extract data.tar.gz on web1
+  hosts: web1
+  tasks:
+  - unarchive:
+      src: /root/data.tar.gz
+      dest: /srv
+      remote_src: yes
+
+  - file: path=/root/data.tar.gz state=absentRemote_src: yes 
+  ## this is if the src file is in the target node. If its in the control node, then don’t add this. 
+
+---
+- name: Download and extract from URL
+  hosts: web1
+  tasks:
+  -   unarchive:
+       src: https://github.com/kodekloudhub/Hello-World/archive/master.zip
+       dest: /root
+       remote_src: yes
+# download zip file from internet as source, and then unzip it using unarchive
+
+- name: Compress multiple files
+  hosts: web1
+  tasks:
+  - archive:
+     path:
+      - /root/file1.txt
+      - /usr/local/share/file2.txt
+      - /var/log/lastlog
+     dest: /root/files.tar.bz2
+     format: bz2
+#syntax for zipping a number of files and chuching them into one directory
+
+---
+- name: Install and configure nginx on web1
+  hosts: web1
+  tasks:
+  - name: Install nginx
+    yum: name=nginx state=installed
+  - name: Start nginx
+    service: name=nginx state=started enabled=yes
+
+  - name: Extract nginx.zip
+    unarchive: src=/root/nginx.zip dest=/usr/share/nginx/html remote_src=yes
+
+  - name: Replace line in index.html
+    replace:
+     path: /usr/share/nginx/html/index.html
+     regexp: This is sample html code
+     replace: This is KodeKloud Ansible lab
+  #long playbookwhich downloads, unzips and then uses the REPLACE MODULE
+
+#CRON JOBS
+---
+- name: Create a cron job to clear last log
+  hosts: node00
+  tasks:
+   - name: Create cron job
+     cron:
+       name: "Clear Lastlog"
+       minute: "0"
+       hour: "0"
+       job: echo "" > /var/log/lastlog
+
+---
+- name: Create a cron job to run free.sh script
+  hosts: node00
+  tasks:
+   - name: Create cron job
+     cron:
+       name: "Free Memory Check"
+       minute: "0"
+       hour: "*/2"
+       job: "sh /root/free.sh"
+#running a shell script upon cron
+---
+- name: remove cron job from node00
+  hosts: node00
+  tasks:
+  - name: Remove cron job
+    cron:
+      name: "Check Memory"
+      state: absent
+#removing a cro job
+
+---
+- name: Cleanup /tmp after every reboot
+  hosts: node00
+  tasks:
+   - cron:
+      name: cleanup
+      job: rm -rf /tmp/*
+      special_time: reboot
+#special time option for reboot
+
+- name: Create cron for yum
+  hosts: node00
+  gather_facts: no
+  tasks:
+    - name: Creates a cron
+      cron:
+        name: yum update
+        weekday: 0
+        minute: 5
+        hour: 8
+        user: root
+        job: "yum -y update"
+        cron_file: ansible_yum
+#cron file,update with root user privelleges
