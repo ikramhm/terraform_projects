@@ -18,8 +18,9 @@ resource "aws_subnet" "public" {
 
 resource "aws_subnet" "private" {
   vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.3.0/24"
-  availability_zone = "eu-west-1"
+  cidr_block        = var.cidr-private-subnet[count.index] #"10.0.3.0/24"
+  availability_zone = var.az[count.index]                  #"eu-west-1"
+  count             = 2
 
   tags = { Name = "private-sub" }
 }
@@ -99,16 +100,23 @@ resource "aws_security_group" "allow_tls_db" {
 }
 
 #EC2 configurations
+
+module "ec2-db" {
+  source = "../modules/ec2-db"
+}
+
 resource "aws_instance" "web" {
-  ami                         = "ami-04" #I should really be using datasource for this
+  ami                         = data.aws_ami.app_ami.id
   instance_type               = "t2.micro"
   key_name                    = "3-tier-demo"
   subnet_id                   = aws_subnet.public[count.index].id
   vpc_security_group_ids      = [aws_security_group.allow_tls.id]
   associate_public_ip_address = true
   count                       = 2
+  user_data                   = local.user_data
+  tags                        = { name = "Webserver" }
 
-  tags = { name = "Webserver" }
+
 
   provisioner "file" {
     source      = "./3-tier-demo.pem"
@@ -123,18 +131,9 @@ resource "aws_instance" "web" {
   }
 }
 
-resource "aws_instance" "db" {
-  ami                    = "ami-ka" #I should really be using datasource for this
-  instance_type          = "t2.micro"
-  key_name               = "3-tier-demo"
-  subnet_id              = aws_subnet.private.id
-  vpc_security_group_ids = [aws_security_group.allow_tls_db.id]
 
-  tags = { name = "Db Server" }
-}
 
 #Internet Gateway and such
-
 resource "aws_internet_gateway" "gw" {
   vpc_id = aws_vpc.main.id
 
@@ -196,7 +195,7 @@ resource "aws_lb_target_group" "albtg" {
   target_type = "instance"
   vpc_id      = aws_vpc.main.id
 
-  health_checks {
+  health_check {
     healthy_threshold   = 3
     unhealthy_threshold = 10
     timeout             = 5
@@ -213,7 +212,7 @@ resource "aws_lb_target_group_attachment" "front_end" {
   count            = 2
 }
 
-resource "aws_lb_listen" "albl" {
+resource "aws_lb_listener" "albl" {
   load_balancer_arn = aws_lb.alb.arn
   port              = 80
   protocol          = "HTTP"
@@ -223,3 +222,22 @@ resource "aws_lb_listen" "albl" {
     target_group_arn = aws_lb_target_group.albtg.arn
   }
 }
+
+##ROUTE53 config
+resource "aws_route53_zone" "main" {
+  name = var.domain_name #partial config, enter this as "example.com"
+}
+
+resource "aws_route53_record" "www" {
+  zone_id = aws_route53_zone.main.zone_id
+  name    = var.record_name
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.alb.dns_name
+    zone_id                = aws_lb.alb.zone_id
+    evaluate_target_health = true
+  }
+}
+#very simple alias record to point the main domain name to the ALB. To understand this more, reflect on NS. The NS refers to the apex. 
+#This record routes a subdomain "www" to NS.
