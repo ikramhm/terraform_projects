@@ -120,7 +120,7 @@ resource "aws_instance" "web" {
 
   provisioner "file" {
     source      = "./3-tier-demo.pem"
-    destination = "/home/ec2-user/3-tier-demo.pem"
+    destination = "/home/ec2-user/3-tier-demo.pem" ##DO NOT SUBMIT THIS TO GITHUB. Make SURE ITS IN YOUR GITIGNORE!!
 
     connection {
       type        = "ssh"
