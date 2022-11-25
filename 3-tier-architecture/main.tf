@@ -102,7 +102,7 @@ resource "aws_security_group" "allow_tls_db" {
 #EC2 configurations
 
 module "ec2-db" {
-  source = "../modules/ec2-db"
+  source = "./modules/ec2-db"
 }
 
 resource "aws_instance" "web" {
